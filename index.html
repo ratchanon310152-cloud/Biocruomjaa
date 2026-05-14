@@ -457,18 +457,18 @@ function renderQBuilder(idx, q) {
   el.innerHTML = `
     <div class="q-header">
       <span class="q-num">คำถามที่ ${idx+1}</span>
-      <button class="btn btn-danger btn-sm" onclick="removeQuestion(${idx})">🗑 ลบ</button>
+      <button class="btn btn-danger btn-sm" data-action="remove">🗑 ลบ</button>
     </div>
     <div class="form-group">
       <label>ข้อความคำถาม</label>
-      <textarea placeholder="พิมพ์คำถาม..." oninput="questions[${idx}].text=this.value">${q.text}</textarea>
+      <textarea placeholder="พิมพ์คำถาม..." data-field="text">${q.text}</textarea>
     </div>
     <div class="form-group">
       <label>🖼️ รูปภาพคำถาม (ไม่บังคับ)</label>
       <div class="img-upload-zone${q.image?' has-image':''}" id="qzone-${idx}">
-        ${q.image?`<img src="${q.image}"><button class="img-remove-btn" onclick="rmQImg(${idx},event)">✕</button>`
+        ${q.image?`<img src="${q.image}"><button class="img-remove-btn" data-action="rm-q-img">✕</button>`
           :`<div style="font-size:1.8rem">🖼️</div><div style="font-size:.75rem;color:var(--muted)">คลิกเพื่ออัปโหลดรูปภาพ</div>`}
-        <input type="file" accept="image/*" onchange="onQImg(${idx},this)">
+        <input type="file" accept="image/*" data-action="q-img">
       </div>
     </div>
     <div class="form-group">
@@ -479,15 +479,15 @@ function renderQBuilder(idx, q) {
             <div class="answer-input-wrap">
               <span class="answer-dot" style="background:${COLORS[i]}"></span>
               <input type="text" placeholder="ตัวเลือก ${i+1}" value="${a}"
-                oninput="questions[${idx}].answers[${i}]=this.value" style="flex:1">
+                data-field="answer" data-i="${i}" style="flex:1">
               <button class="answer-correct-btn${i===q.correct?' correct':''}" id="cb-${idx}-${i}"
-                onclick="setCorrect(${idx},${i})">✓</button>
+                data-action="set-correct" data-i="${i}">✓</button>
             </div>
             <div class="img-upload-zone${q.answerImages[i]?' has-image':''}" id="azone-${idx}-${i}" style="min-height:58px">
               ${q.answerImages[i]
-                ?`<img src="${q.answerImages[i]}" style="max-height:58px"><button class="img-remove-btn" onclick="rmAImg(${idx},${i},event)">✕</button>`
+                ?`<img src="${q.answerImages[i]}" style="max-height:58px"><button class="img-remove-btn" data-action="rm-a-img" data-i="${i}">✕</button>`
                 :`<span style="font-size:1.1rem">🖼</span><span style="color:var(--muted);font-size:.7rem">รูปตัวเลือก</span>`}
-              <input type="file" accept="image/*" onchange="onAImg(${idx},${i},this)">
+              <input type="file" accept="image/*" data-action="a-img" data-i="${i}">
             </div>
           </div>
         `).join('')}
@@ -496,11 +496,52 @@ function renderQBuilder(idx, q) {
     <div class="form-group" style="margin-bottom:0">
       <label>เวลา</label>
       <div class="time-select" id="tchips-${idx}">
-        ${TIMES.map(t=>`<button class="time-chip${t===q.time?' active':''}" onclick="setTime(${idx},${t},this)">${t}s</button>`).join('')}
+        ${TIMES.map(t=>`<button class="time-chip${t===q.time?' active':''}" data-action="set-time" data-time="${t}">${t}s</button>`).join('')}
       </div>
     </div>
   `;
   document.getElementById('questionsContainer').appendChild(el);
+
+  // Bind event handlers using addEventListener (module scope safe)
+  // Text input
+  const textArea = el.querySelector('textarea[data-field="text"]');
+  textArea.addEventListener('input', e => { questions[idx].text = e.target.value; });
+
+  // Remove question button
+  el.querySelector('[data-action="remove"]').addEventListener('click', () => removeQuestion(idx));
+
+  // Question image upload
+  el.querySelector('[data-action="q-img"]').addEventListener('change', e => onQImg(idx, e.target));
+  const rmQ = el.querySelector('[data-action="rm-q-img"]');
+  if(rmQ) rmQ.addEventListener('click', e => rmQImg(idx, e));
+
+  // Answer inputs
+  el.querySelectorAll('input[data-field="answer"]').forEach(input => {
+    const i = parseInt(input.dataset.i);
+    input.addEventListener('input', e => { questions[idx].answers[i] = e.target.value; });
+  });
+
+  // Correct answer buttons
+  el.querySelectorAll('[data-action="set-correct"]').forEach(btn => {
+    const i = parseInt(btn.dataset.i);
+    btn.addEventListener('click', () => setCorrect(idx, i));
+  });
+
+  // Answer image uploads
+  el.querySelectorAll('[data-action="a-img"]').forEach(input => {
+    const i = parseInt(input.dataset.i);
+    input.addEventListener('change', e => onAImg(idx, i, e.target));
+  });
+  el.querySelectorAll('[data-action="rm-a-img"]').forEach(btn => {
+    const i = parseInt(btn.dataset.i);
+    btn.addEventListener('click', e => rmAImg(idx, i, e));
+  });
+
+  // Time chips
+  el.querySelectorAll('[data-action="set-time"]').forEach(btn => {
+    const t = parseInt(btn.dataset.time);
+    btn.addEventListener('click', () => setTime(idx, t, btn));
+  });
 }
 
 window.removeQuestion = function(idx) {
