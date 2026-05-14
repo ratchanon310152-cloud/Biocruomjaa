@@ -610,18 +610,40 @@ window.delSaved = function(i){
 };
 
 // ── HOST GAME ─────────────────────────────────
+function sanitizeQuestions(qs) {
+  // Firebase strips null values, so convert to empty strings/objects to preserve structure
+  return qs.map(q => ({
+    text: q.text || '',
+    image: q.image || '',
+    answers: [
+      (q.answers && q.answers[0]) || '',
+      (q.answers && q.answers[1]) || '',
+      (q.answers && q.answers[2]) || '',
+      (q.answers && q.answers[3]) || ''
+    ],
+    answerImages: [
+      (q.answerImages && q.answerImages[0]) || '',
+      (q.answerImages && q.answerImages[1]) || '',
+      (q.answerImages && q.answerImages[2]) || '',
+      (q.answerImages && q.answerImages[3]) || ''
+    ],
+    correct: q.correct || 0,
+    time: q.time || 20
+  }));
+}
+
 async function hostGame(title, qs) {
   clearSubs();
   const pin = Math.floor(100000+Math.random()*900000).toString();
   myPin = pin; isHost = true; myName = 'HOST'; curQIdx = 0;
-  questions = JSON.parse(JSON.stringify(qs));
+  questions = sanitizeQuestions(qs);
   gameRef = ref(db, 'games/'+pin);
 
   // Write game to Firebase
   await set(gameRef, {
     title, pin, phase:'lobby', started:false,
-    currentQuestion:0, questions:JSON.parse(JSON.stringify(qs)),
-    players:{}, scores:{}, answered:{}, hostOnline:true
+    currentQuestion:0, questions: questions,
+    players:{__init__:true}, scores:{__init__:0}, answered:{__init__:0}, hostOnline:true
   });
 
   document.getElementById('lobbyPin').textContent = pin;
@@ -634,7 +656,7 @@ async function hostGame(title, qs) {
   const playersRef = ref(db, 'games/'+pin+'/players');
   const unsub = onValue(playersRef, snap => {
     const players = snap.val() || {};
-    const names = Object.keys(players);
+    const names = Object.keys(players).filter(n => n !== '__init__');
     const grid = document.getElementById('playersGrid');
     grid.innerHTML='';
     names.forEach(n=>{
@@ -655,7 +677,7 @@ window.cancelLobby = async function() {
 
 window.startGame = async function() {
   clearSubs();
-  await update(ref(db,'games/'+myPin), {phase:'question', started:true, currentQuestion:0, answered:{}});
+  await update(ref(db,'games/'+myPin), {phase:'question', started:true, currentQuestion:0, answered:{__init__:0}});
   showHostQuestion(0);
 };
 
@@ -670,7 +692,7 @@ function showHostQuestion(idx) {
   document.getElementById('progressBar').style.width = (idx/questions.length*100)+'%';
 
   // Reset answered in Firebase
-  update(ref(db,'games/'+myPin), {currentQuestion:idx, answered:{}, phase:'question'});
+  update(ref(db,'games/'+myPin), {currentQuestion:idx, answered:{__init__:0}, phase:'question'});
 
   // Build question card
   const card = document.getElementById('hostQuestionCard'); card.innerHTML='';
@@ -686,10 +708,12 @@ function showHostQuestion(idx) {
   const playersRef = ref(db,'games/'+myPin+'/players');
 
   let totalPlayers = 0;
-  const unsubP = onValue(playersRef, snap => { totalPlayers = Object.keys(snap.val()||{}).length; });
+  const unsubP = onValue(playersRef, snap => {
+    totalPlayers = Object.keys(snap.val()||{}).filter(n=>n!=='__init__').length;
+  });
   const unsubA = onValue(ansRef, snap => {
     const answered = snap.val()||{};
-    const cnt = Object.keys(answered).length;
+    const cnt = Object.keys(answered).filter(n=>n!=='__init__').length;
     document.getElementById('answeredCount').textContent = cnt+' ตอบ';
     if(totalPlayers>0 && cnt>=totalPlayers) revealAnswer(idx);
   });
@@ -852,7 +876,7 @@ function showResultsPlayer(scores){
 function renderResults(scores){
   clearSubs();
   showScreen('resultsScreen');
-  const sorted=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+  const sorted=Object.entries(scores).filter(([k])=>k!=='__init__').sort((a,b)=>b[1]-a[1]);
   const podium=document.getElementById('podiumDisplay'); podium.innerHTML='';
   const ORDER=[1,0,2],ICONS=['🥈','🥇','🥉'],H=['108px','148px','78px'];
   ORDER.forEach((rank,col)=>{
@@ -872,7 +896,8 @@ function renderResults(scores){
 
 window.playAgain = async function(){
   if(isHost){
-    await update(ref(db,'games/'+myPin),{phase:'lobby',started:false,currentQuestion:0,answered:{},scores:{}});
+    await update(ref(db,'games/'+myPin),{phase:'lobby',started:false,currentQuestion:0,
+      answered:{__init__:0},scores:{__init__:0}});
     document.getElementById('lobbyPin').textContent=myPin;
     document.getElementById('playersGrid').innerHTML='';
     document.getElementById('startGameBtn').disabled=true;
@@ -880,7 +905,7 @@ window.playAgain = async function(){
     // Re-listen players
     const playersRef=ref(db,'games/'+myPin+'/players');
     const unsub=onValue(playersRef,snap=>{
-      const players=snap.val()||{}; const names=Object.keys(players);
+      const players=snap.val()||{}; const names=Object.keys(players).filter(n=>n!=='__init__');
       const grid=document.getElementById('playersGrid'); grid.innerHTML='';
       names.forEach(n=>{const c=document.createElement('div');c.className='player-chip';c.textContent=n;grid.appendChild(c);});
       document.getElementById('playerCountText').textContent=names.length>0?`${names.length} คนเข้าร่วมแล้ว 🎉`:'กำลังรอผู้เล่น...';
@@ -895,15 +920,20 @@ window.playAgain = async function(){
 // ── BUILD ANSWER BUTTONS ──────────────────────
 function buildBtns(containerId, q, isPlayer){
   const container=document.getElementById(containerId); container.innerHTML='';
-  q.answers.forEach((a,i)=>{
-    const hasImg=!!q.answerImages[i];
+  // Safety: Firebase strips null values, so ensure arrays exist
+  const answers = q.answers || ['','','',''];
+  const answerImages = q.answerImages || [null,null,null,null];
+  for(let i=0;i<4;i++){
+    const a = answers[i] || '';
+    const hasImg=!!answerImages[i];
     const btn=document.createElement('button');
     btn.className='ans-btn'+(isPlayer?'':' locked')+(hasImg?' ans-has-img':'');
     btn.setAttribute('data-i',i);
-    if(hasImg){btn.innerHTML=`<img src="${q.answerImages[i]}" alt=""><span>${SHAPES[i]} ${a}</span>`;}
-    else{btn.innerHTML=`<span class="ans-shape">${SHAPES[i]}</span><span>${a}</span>`;}
+    const label = a || `ตัวเลือก ${i+1}`;
+    if(hasImg){btn.innerHTML=`<img src="${answerImages[i]}" alt=""><span>${SHAPES[i]} ${label}</span>`;}
+    else{btn.innerHTML=`<span class="ans-shape">${SHAPES[i]}</span><span>${label}</span>`;}
     container.appendChild(btn);
-  });
+  }
 }
 
 // ── TIMER UI ──────────────────────────────────
